@@ -24,3 +24,17 @@ double r = (r_parallel * R_ADC) / (R_ADC - r_parallel);
 
   return r_to_t(r);
 }
+
+bool tof_initialized = false;
+static vl53x dev_ptr_;
+
+int init_tof(uint8_t addr, iic_index_t iic_index, int long_distance){
+	if ( tofInit(&dev_ptr_, iic_index, addr, long_distance)) return -1; 
+  tof_initialized = true;
+  return 0;
+}
+
+uint32_t read_tof() {
+  if (!tof_initialized) return 1;
+	return tofReadDistance(&dev_ptr_);
+}

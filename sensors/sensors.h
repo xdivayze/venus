@@ -1,6 +1,8 @@
 #pragma once
 
 #include_next <math.h>
+#include <stdint.h>
+#include "vl53l0x.h" 
 
 #define R_0 10000.0
 #define NOMINAL_V 3.3
@@ -17,3 +19,9 @@ static inline double r_to_t(double r_t) {
 
   return t_celsius;
 }
+
+double read_temperature();
+
+int init_tof(uint8_t addr, iic_index_t iic_index, int long_distance);
+
+uint32_t read_tof();
