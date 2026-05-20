@@ -1,8 +1,8 @@
 #pragma once
 
+#include "vl53l0x.h"
 #include_next <math.h>
 #include <stdint.h>
-#include "vl53l0x.h" 
 
 #define R_0 10000.0
 #define NOMINAL_V 3.3
@@ -26,4 +26,7 @@ int init_tof(uint8_t addr, iic_index_t iic_index, int long_distance);
 
 uint32_t read_tof();
 
-enum COLOR_SENSOR_COLORS {}
+enum color_sensor_colors { BLACK, WHITE, RED, BLUE, GREEN };
+
+color_sensor_colors get_color();
+

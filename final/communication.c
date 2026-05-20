@@ -1,10 +1,8 @@
 #include "communication.h"
-#include "libpynq_port.h"
+#include <libpynq.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define UART0 1
 
 #define PAUSE_SLEEP_DUR_MSEC 500
 #define IDLE_SLEEP_DUR_MSEC 1
