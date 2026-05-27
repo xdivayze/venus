@@ -1,0 +1,27 @@
+=== wall follower + interior grid + marker trace ===
+start cell:              (64, 64)
+end cell:                (38, 108)
+elapsed:                 0.021 s
+
+-- cells --
+white cells covered:     3707
+black tape cells:        493
+other-color cells:       52
+
+-- totals --
+turn() calls:            2233
+step() calls:            7296
+checkColor() calls:      8433
+total rotation:          208260.0° (578.5 full revolutions)
+
+-- phase 1: wall follower (0.003 s) --
+turn() calls:            1128
+step() calls:            475
+checkColor() calls:      1041
+
+-- phase 2: interior grid (0.018 s) --
+turn() calls:            1105
+step() calls:            6821
+checkColor() calls:      7392
+rows swept:              82
+markers traced:          8
