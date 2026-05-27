@@ -26,7 +26,6 @@ int init_tof(uint8_t addr, iic_index_t iic_index, int long_distance);
 
 uint32_t read_tof();
 
-enum color_sensor_colors { BLACK, WHITE, RED, BLUE, GREEN };
+enum color_sensor_colors { BLACK, WHITE, RED, BLUE, GREEN, DEFAULT };
 
-color_sensor_colors get_color();
-
+enum color_sensor_colors get_color();

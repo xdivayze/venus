@@ -56,7 +56,7 @@ static float get_color_frequency(pulsecounter_index_t pci) {
   return ((float)pulses / cycles) * 1000000;
 }
 
-color_sensor_colors get_color() {
+enum color_sensor_colors get_color() {
   gpio_set_level(IO_AR6, GPIO_LEVEL_LOW);
   gpio_set_level(IO_AR7, GPIO_LEVEL_LOW);
   sleep_msec(5);
@@ -88,4 +88,6 @@ color_sensor_colors get_color() {
   } else if ((green > red) && (green > blue)) {
     return GREEN;
   }
+
+  return DEFAULT;
 }

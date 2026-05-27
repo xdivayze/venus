@@ -31,8 +31,8 @@ class Robot:
         return self.bytemap[newx][newy];
     
     def checkColorRight(self):
-        newx = round( self.location[0] + round(self.colorWorkingDistance * math.cos(self.angle - 90)))
-        newy = round(self.location[1] + round(self.colorWorkingDistance * math.sin(self.angle - 90)))
+        newx = round( self.location[0] + round(self.colorWorkingDistance * math.cos(self.angle - math.pi / 2)))
+        newy = round(self.location[1] + round(self.colorWorkingDistance * math.sin(self.angle - math.pi / 2)))
         return self.bytemap[newx][newy];
     
     
