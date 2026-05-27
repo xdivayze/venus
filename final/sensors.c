@@ -6,7 +6,7 @@
 #define ADC_MAX 65535
 #define ADC_CHANNEL ADC0
 
-#define R_ADC 3550.0 // measured pull-down at the ADC pin
+#define R_ADC 3250.0 // measured pull-down at the ADC pin (calibrate)
 
 static inline double read_voltage() {
   size_t raw = adc_read_channel_raw(ADC_CHANNEL);
@@ -16,6 +16,7 @@ static inline double read_voltage() {
 
 double read_temperature() {
   double v = read_voltage();
+  // double v = adc_read_channel(ADC_CHANNEL); //substitute if the code above is not working
 
   double r_parallel = R_0 * (v / (NOMINAL_V - v));
   double r = (r_parallel * R_ADC) / (R_ADC - r_parallel);

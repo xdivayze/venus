@@ -25,14 +25,9 @@ class Robot:
     def checkDistance(self):
         return -1;
         
-    def checkColorFront(self):
+    def checkColor(self):
         newx = round( self.location[0] + round(self.colorWorkingDistance * math.cos(self.angle)))
         newy = round(self.location[1] + round(self.colorWorkingDistance * math.sin(self.angle)))
-        return self.bytemap[newx][newy];
-    
-    def checkColorRight(self):
-        newx = round( self.location[0] + round(self.colorWorkingDistance * math.cos(self.angle - 90)))
-        newy = round(self.location[1] + round(self.colorWorkingDistance * math.sin(self.angle - 90)))
         return self.bytemap[newx][newy];
     
     
