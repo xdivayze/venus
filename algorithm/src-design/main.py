@@ -1,3 +1,5 @@
+import socket
+
 from robot import Robot
 import math
 import os
@@ -194,6 +196,21 @@ def write_report(black, white, other, stats, out_path):
 
 
 if __name__ == "__main__":
+    socket_path = "/tmp/robot_sock";
+    try:
+        os.unlink(socket_path);
+    except OSError:
+        if (os.path.exists(socket_path)):
+            raise
+    
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM);
+    server.bind(socket_path);
+    
+    server.listen(1);
+    
+    connection, client_addr = server.accept();
+    
+    
     here = os.path.dirname(os.path.abspath(__file__))
 
     robot = Robot(1, 128)
