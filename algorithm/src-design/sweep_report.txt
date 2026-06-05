@@ -1,16 +1,28 @@
-=== wall follower (front + right sensors, relative turns) ===
+=== proportional edge-follower (front + right sensors) ===
 start cell:              (64, 64)
-end cell:                (115, 64)
-elapsed:                 0.003 s
+end cell:                (35, 77)
+elapsed:                 0.006 s
+
+-- config --
+steering increment:      20.0°
+tape band width:         3 px
 
 -- cells --
-white cells covered:     488
-black tape cells:        322
+path cells covered:      714
+tape band cells:         415
 other-color cells:       0
 
 -- totals --
-turn() calls:            243
-step() calls:            489
-checkColor*() calls:     1295
-  right turns:           119
-  left turns:            124
+turn() calls:            527
+step() calls:            756
+checkColor*() calls:     1584
+total rotation:          9217° (25.6 revolutions)
+
+-- phase 1: outer boundary (0.002 s) --
+termination:             returned home
+turn() calls:            256
+step() calls:            420
+
+-- phase 2: interior objects (0.004 s) --
+objects found:           3
+objects traced:          3

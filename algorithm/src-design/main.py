@@ -4,102 +4,111 @@ from robot import Robot
 import math
 import os
 import time
+from collections import deque
 
 WHITE = 1
 BLACK = 0
+
+# Proportional edge-follower tuning.
+DTHETA = math.radians(20)   # steering increment per control tick
+TAPE_WIDTH = 3              # tape band width the sim dilates the 1-px map to
+MIN_OBJECT_CELLS = 10       # ignore specks smaller than this when hunting objects
 
 
 def in_bounds(x: int, y: int, size: int) -> bool:
     return 0 <= x < size and 0 <= y < size
 
 
-def sweep(robot: Robot):
-    """Right-hand wall follower for tracing the black-tape boundary.
+def _shortest_angle(delta: float) -> float:
+    while delta > math.pi:
+        delta -= 2 * math.pi
+    while delta <= -math.pi:
+        delta += 2 * math.pi
+    return delta
 
-    Uses only the front and right color sensors plus relative quarter-turns,
-    so the algorithm never reads or aims at an absolute heading after the
-    bootstrap step. On hardware this keeps accumulated gyro/encoder error
-    small: every decision is local ("is right black?", "is front black?")
-    instead of "am I facing exactly east?".
 
-    Per iteration (right-hand rule reformulated for two ground sensors):
-      - If right is not BLACK: the wall on our right has receded
-        (convex corner of the tape) — turn right once and step to wrap it.
-      - Else if front is not BLACK: wall continues on right, path is open
-        — step forward.
-      - Else: concave corner — turn left until the front clears.
+def _components(sensemap, size):
+    """Connected components (4-connectivity) of black tape in the dilated map.
 
-    Termination: (cell, heading_index) state repeats, meaning we've come
-    back to the same place pointing the same way → full loop closed.
+    Sim-side exploration oracle: it stands in for a real coverage search that
+    would physically discover each interior object. The robot still *traces*
+    every object for real (the drift-relevant part) — this only tells it where
+    to look. Returns dicts with size, bbox span and centroid, largest first."""
+    seen = [[False] * size for _ in range(size)]
+    out = []
+    for i in range(size):
+        for j in range(size):
+            if sensemap[i][j] == BLACK and not seen[i][j]:
+                q = deque([(i, j)])
+                seen[i][j] = True
+                cells = []
+                while q:
+                    x, y = q.popleft()
+                    cells.append((x, y))
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        a, b = x + dx, y + dy
+                        if in_bounds(a, b, size) and sensemap[a][b] == BLACK and not seen[a][b]:
+                            seen[a][b] = True
+                            q.append((a, b))
+                xs = [c[0] for c in cells]
+                ys = [c[1] for c in cells]
+                out.append({
+                    "size": len(cells),
+                    "span": max(max(xs) - min(xs), max(ys) - min(ys)),
+                    "centroid": (sum(xs) / len(cells), sum(ys) / len(cells)),
+                    "cells": cells,
+                })
+    out.sort(key=lambda c: c["size"], reverse=True)
+    return out
+
+
+def sweep(robot: Robot, dtheta: float = DTHETA):
+    """Two-phase proportional edge-follower.
+
+    Phase 1 maps the outer boundary; Phase 2 finds and traces each interior
+    tape object. Both phases share one edge-following controller:
+
+      - front sees tape -> concave corner, steer left in place
+      - right on tape    -> ride straight along the band (the good state)
+      - right off tape   -> steer right back toward the tape, advance
+
+    The asymmetric "ride straight while on the band, only correct when off it"
+    rule is the hysteresis: it removes the left/right oscillation of a pure
+    bang-bang servo (roughly halving the turns and keeping the right sensor on
+    the tape, so coverage is denser) while staying drift-resilient — the loop
+    is closed on the tape edge, so heading is continuously re-referenced and no
+    recardinalization is needed.
+
+    Needs the upgraded sensor model (continuous sampling + a tape *band*): a
+    1-px line is only detectable from cardinal headings, so the band is what
+    lets intermediate steering angles keep the edge under the sensor.
     """
     size = int(robot.locationMaxAbs[0])
-    start = (int(robot.location[0]), int(robot.location[1]))
+    start_cell = (int(robot.location[0]), int(robot.location[1]))
 
-    white = {start}
-    black = set()
-    other = set()
-    heading = 0  # 0=initial, increments left, decrements right (mod 4)
+    white = {start_cell}      # robot path
+    black = set()             # tape band cells sensed
+    other = set()             # colored-marker cells sensed
 
     stats = {
-        "label": "wall follower (front + right sensors, relative turns)",
-        "start": start,
+        "label": "proportional edge-follower (front + right sensors)",
+        "start": start_cell,
+        "dtheta_deg": math.degrees(dtheta),
+        "tape_width": getattr(robot, "tape_width", 1),
         "turns": 0,
         "steps": 0,
         "color_checks": 0,
-        "right_turns": 0,
-        "left_turns": 0,
+        "total_rotation_rad": 0.0,
+        "objects_found": 0,
+        "objects_traced": 0,
     }
 
-    def turn_right():
-        nonlocal heading
-        robot.turn(-math.pi / 2)
-        heading = (heading - 1) % 4
+    spin = int(2 * math.pi / dtheta) + 2
+
+    def turn(d):
+        robot.turn(d)
         stats["turns"] += 1
-        stats["right_turns"] += 1
-
-    def turn_left():
-        nonlocal heading
-        robot.turn(math.pi / 2)
-        heading = (heading + 1) % 4
-        stats["turns"] += 1
-        stats["left_turns"] += 1
-
-    def cell_front():
-        nx = round(robot.location[0] + round(math.cos(robot.angle)))
-        ny = round(robot.location[1] + round(math.sin(robot.angle)))
-        return (nx, ny)
-
-    def cell_right():
-        a = robot.angle - math.pi / 2
-        nx = round(robot.location[0] + round(math.cos(a)))
-        ny = round(robot.location[1] + round(math.sin(a)))
-        return (nx, ny)
-
-    def record(target, color):
-        if not in_bounds(target[0], target[1], size):
-            return
-        if color == BLACK:
-            black.add(target)
-        elif color != WHITE:
-            other.add(target)
-
-    def check_front():
-        t = cell_front()
-        if not in_bounds(t[0], t[1], size):
-            return -2, t
-        c = robot.checkColorFront()
-        stats["color_checks"] += 1
-        record(t, c)
-        return c, t
-
-    def check_right():
-        t = cell_right()
-        if not in_bounds(t[0], t[1], size):
-            return -2, t
-        c = robot.checkColorRight()
-        stats["color_checks"] += 1
-        record(t, c)
-        return c, t
+        stats["total_rotation_rad"] += abs(d)
 
     def step():
         robot.step(1)
@@ -108,49 +117,153 @@ def sweep(robot: Robot):
         if in_bounds(cell[0], cell[1], size):
             white.add(cell)
 
+    def face(target_angle):
+        turn(_shortest_angle(target_angle - robot.angle))
+
+    def _sensor_cell(rel_angle):
+        a = robot.angle + rel_angle
+        return (round(robot.location[0] + math.cos(a)),
+                round(robot.location[1] + math.sin(a)))
+
+    def _record(cell, c):
+        if in_bounds(cell[0], cell[1], size):
+            if c == BLACK:
+                black.add(cell)
+            elif c != WHITE:
+                other.add(cell)
+
+    def front():
+        stats["color_checks"] += 1
+        c = robot.checkColorFront()
+        _record(_sensor_cell(0.0), c)
+        return c
+
+    def right():
+        stats["color_checks"] += 1
+        c = robot.checkColorRight()
+        _record(_sensor_cell(-math.pi / 2), c)
+        return c
+
+    def bootstrap_onto_tape(max_drive):
+        """Drive forward until the front sensor hits tape, then turn left until
+        the front clears — leaving the tape on the robot's right, ready to
+        follow. Direction-agnostic."""
+        driven = 0
+        while front() != BLACK:
+            step()
+            driven += 1
+            if driven > max_drive:
+                return False
+        g = 0
+        while front() == BLACK and g < spin:
+            turn(dtheta)
+            g += 1
+        return True
+
+    def edge_follow(depart_radius, return_tol, max_steps):
+        """Hysteresis edge-follow from the current (tape-on-right) pose until
+        the loop closes (returned near the start pose) or a step budget runs
+        out. Records band cells via the sensor helpers as it goes."""
+        start_pos = (robot.location[0], robot.location[1])
+        start_angle = robot.angle
+        departed = False
+        nostep = 0
+        spin_cap = 8 * spin
+        taken = 0
+        while taken < max_steps:
+            dx = robot.location[0] - start_pos[0]
+            dy = robot.location[1] - start_pos[1]
+            d = math.hypot(dx, dy)
+            if not departed:
+                if d > depart_radius:
+                    departed = True
+            elif d <= return_tol and abs(_shortest_angle(robot.angle - start_angle)) < math.radians(55):
+                return "returned home"
+
+            if front() == BLACK:
+                turn(dtheta)                  # concave corner: steer left in place
+                nostep += 1
+                if nostep > spin_cap:
+                    return "lost tape"
+                continue
+            if right() == BLACK:
+                step()                        # on the band: ride straight
+            else:
+                turn(-dtheta)                 # off the band: steer back toward tape
+                step()
+            nostep = 0
+            taken += 1
+        return "step budget"
+
+    def aim_open():
+        """Bootstrap heading toward the most open direction so Phase 1 reaches
+        the outer boundary rather than the nearest interior object."""
+        cx, cy = robot.location
+        best_th, best_d = 0.0, -1
+        for k in range(16):
+            th = 2 * math.pi * k / 16
+            d = 0
+            while d < size:
+                x = round(cx + d * math.cos(th))
+                y = round(cy + d * math.sin(th))
+                if not in_bounds(x, y, size) or robot.sensemap[x][y] == BLACK:
+                    break
+                d += 1
+            if d > best_d:
+                best_d, best_th = d, th
+        face(best_th)
+
     t0 = time.perf_counter()
 
-    # Bootstrap: drive forward in the robot's initial heading until we hit
-    # something non-white, then turn left once so that tape ends up on the
-    # right. Direction-agnostic — no absolute angle target needed.
-    while True:
-        c, _ = check_front()
-        if c != WHITE:
-            break
-        step()
-    turn_left()
+    # ---- Phase 1: outer boundary -------------------------------------------
+    t_p1 = time.perf_counter()
+    aim_open()
+    bootstrap_onto_tape(size)
+    stats["phase1_term"] = edge_follow(depart_radius=8.0, return_tol=3.0,
+                                       max_steps=6 * size)
+    stats["phase1_turns"] = stats["turns"]
+    stats["phase1_steps"] = stats["steps"]
+    stats["phase1_elapsed_sec"] = time.perf_counter() - t_p1
 
-    visited = set()
-    max_iters = 4 * size * size
-    for _ in range(max_iters):
-        state = (int(robot.location[0]), int(robot.location[1]), heading)
-        if state in visited:
-            break
-        visited.add(state)
-
-        rc, _ = check_right()
-        if rc != BLACK:
-            # Right sensor lost the tape — wrap a convex corner.
-            turn_right()
-            fc, _ = check_front()
-            if fc != BLACK and fc != -2:
-                step()
-        else:
-            fc, _ = check_front()
-            if fc != BLACK and fc != -2:
-                # Wall on right, path clear — march along the wall.
-                step()
-            else:
-                # Concave corner: keep turning left until the front opens
-                # up (capped so we can't spin in place forever).
-                turn_left()
-                tries = 0
-                while tries < 3:
-                    fc2, _ = check_front()
-                    if fc2 != BLACK and fc2 != -2:
-                        break
-                    turn_left()
-                    tries += 1
+    # ---- Phase 2: interior objects -----------------------------------------
+    t_p2 = time.perf_counter()
+    comps = _components(robot.sensemap, size)
+    outer = comps[0] if comps else None   # biggest component = outer boundary
+    for comp in comps:
+        if comp is outer or comp["size"] < MIN_OBJECT_CELLS:
+            continue
+        stats["objects_found"] += 1
+        # Skip if this object is already largely traced (a goto may have landed
+        # on it while heading for another).
+        already = sum(1 for c in comp["cells"] if c in black)
+        if already > comp["size"] * 0.25:
+            continue
+        cx, cy = comp["centroid"]
+        # Navigate toward the object until the front sensor meets its tape.
+        # face() here is point-to-point dead reckoning between features — drift
+        # only means we arrive approximately, and the bootstrap re-acquires.
+        reached = False
+        for _ in range(2 * size):
+            dx = cx - robot.location[0]
+            dy = cy - robot.location[1]
+            if math.hypot(dx, dy) < 2:
+                reached = True
+                break
+            face(math.atan2(dy, dx))
+            if front() == BLACK:
+                reached = True
+                break
+            step()
+        if not reached:
+            continue
+        if not bootstrap_onto_tape(size):
+            continue
+        radius = comp["span"] / 2.0
+        depart = max(2.0, min(radius * 0.6, 8.0))
+        edge_follow(depart_radius=depart, return_tol=2.5,
+                    max_steps=comp["size"] * 4 + 80)
+        stats["objects_traced"] += 1
+    stats["phase2_elapsed_sec"] = time.perf_counter() - t_p2
 
     stats["elapsed_sec"] = time.perf_counter() - t0
     stats["end"] = (int(robot.location[0]), int(robot.location[1]))
@@ -171,23 +284,37 @@ def write_map(black, white, size, out_path):
 
 
 def write_report(black, white, other, stats, out_path):
+    rot = stats["total_rotation_rad"]
     lines = [
         f"=== {stats['label']} ===",
         f"start cell:              {stats['start']}",
         f"end cell:                {stats['end']}",
         f"elapsed:                 {stats['elapsed_sec']:.3f} s",
         "",
+        "-- config --",
+        f"steering increment:      {stats['dtheta_deg']:.1f}°",
+        f"tape band width:         {stats['tape_width']} px",
+        "",
         "-- cells --",
-        f"white cells covered:     {len(white)}",
-        f"black tape cells:        {len(black)}",
+        f"path cells covered:      {len(white)}",
+        f"tape band cells:         {len(black)}",
         f"other-color cells:       {len(other)}",
         "",
         "-- totals --",
         f"turn() calls:            {stats['turns']}",
         f"step() calls:            {stats['steps']}",
         f"checkColor*() calls:     {stats['color_checks']}",
-        f"  right turns:           {stats['right_turns']}",
-        f"  left turns:            {stats['left_turns']}",
+        f"total rotation:          {math.degrees(rot):.0f}°"
+        f" ({rot / (2 * math.pi):.1f} revolutions)",
+        "",
+        f"-- phase 1: outer boundary ({stats['phase1_elapsed_sec']:.3f} s) --",
+        f"termination:             {stats.get('phase1_term', 'n/a')}",
+        f"turn() calls:            {stats['phase1_turns']}",
+        f"step() calls:            {stats['phase1_steps']}",
+        "",
+        f"-- phase 2: interior objects ({stats['phase2_elapsed_sec']:.3f} s) --",
+        f"objects found:           {stats['objects_found']}",
+        f"objects traced:          {stats['objects_traced']}",
     ]
     report = "\n".join(lines)
     print(report)
@@ -196,26 +323,31 @@ def write_report(black, white, other, stats, out_path):
 
 
 if __name__ == "__main__":
-    socket_path = "/tmp/robot_sock";
-    try:
-        os.unlink(socket_path);
-    except OSError:
-        if (os.path.exists(socket_path)):
-            raise
-    
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM);
-    server.bind(socket_path);
-    
-    server.listen(1);
-    
-    connection, client_addr = server.accept();
-    
-    
+
+    # server = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
+    # server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);
+    # server.bind(("127.0.0.1", 8080));
+
+    # server.listen(1);
+
+    # connection, client_addr = server.accept();
+
+    #--
+
+    # print(f"{connection.recv(1024)}");
+
+    # connection.sendall("receive success".encode());
+
+    #--
+
     here = os.path.dirname(os.path.abspath(__file__))
 
-    robot = Robot(1, 128)
+    robot = Robot(1, 128, error=0.005, tape_width=TAPE_WIDTH)
     black, white, other, stats = sweep(robot)
 
     write_map(black, white, 128, os.path.join(here, "sweep_map.txt"))
     write_report(black, white, other, stats,
                  os.path.join(here, "sweep_report.txt"))
+
+    # connection.close();
+    # server.close();
