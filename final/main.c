@@ -1,11 +1,12 @@
+#include "move_utils.h"
+#include "sensors.h"
 #include <arpa/inet.h>
-#include <stdlib.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include "move_utils.h"
 #define PORT 8080
 
 int main() {
@@ -27,26 +28,56 @@ int main() {
     return -1;
 
   char buffer[1024] = {0};
+  char msg[256] = {'\0'};
 
   while (1) {
     read(client_fd, buffer, 1024 - 1);
-    char* payload = strtok(buffer, ":");
+    char *payload = strtok(buffer, ":");
     int command = atoi(buffer);
-    switch (command) {
-        case 100:
-            int nr_steps = ;
-            step(nr_steps);
-            
+    if (command == 100) {
+      int nr_steps = atoi(payload);
+      step(nr_steps);
+      continue;
     }
 
-    
+    if (command == 101) {
+      float angle_rad = atof(payload);
+      float angle_deg = angle_rad * 180.0f / M_PI;
+      rotate_angle(angle_deg);
+      continue;
+    }
 
+    if (command == 200) {
+      float distance_data = read_tof();
+      sprintf(msg, "201:%i", (int)distance_data);
+      send(client_fd, msg, strlen(msg), 0);
+      continue;
+    }
+
+    if (command == 201) {
+      color_to_str(msg, get_color());
+      sprintf(msg, "201:%s", msg);
+      send(client_fd, msg, strlen(msg), 0);
+      continue;
+    }
+    if (command == 202) {
+      float data = check_ir_v(false);
+      sprintf(msg, "202:%.2f", data);
+      send(client_fd, msg, strlen(msg), 0);
+      continue;
+    }
+
+    if (command == 203) {
+      float data = check_ir_v(true);
+      sprintf(msg, "203:%.2f", data);
+      send(client_fd, msg, strlen(msg), 0);
+      continue;
+    }
+
+    if (command == 999) {
+      break;
+    }
   }
-
-  send(client_fd, hello, strlen(hello), 0);
-  printf("sent\n");
-
-  valread = read(client_fd, buffer, 1024 - 1);
-
-  printf("%s\n", buffer);
+  strcpy(msg, "999:ROBOT_END");
+  send(client_fd, msg, strlen(msg), 0);
 }

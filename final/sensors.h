@@ -2,7 +2,9 @@
 
 #include "vl53l0x.h"
 #include_next <math.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #define R_0 10000.0
 #define NOMINAL_V 3.3
@@ -24,8 +26,33 @@ double read_temperature();
 
 int init_tof(uint8_t addr, iic_index_t iic_index, int long_distance);
 
+// distance in MM
 uint32_t read_tof();
 
 enum color_sensor_colors { BLACK, WHITE, RED, BLUE, GREEN, DEFAULT };
 
 enum color_sensor_colors get_color();
+
+static inline void color_to_str(char *s, color_sensor_colors c) {
+  switch (c) {
+  case BLACK:
+    strcpy(s, "BLACK");
+    return;
+  case WHITE:
+    strcpy(s, "WHITE");
+    return;
+  case GREEN:
+    strcpy(s, "GREEN");
+    return;
+  case RED:
+    strcpy(s, "RED");
+    return;
+  case BLUE:
+    strcpy(s, "BLUE");
+    return;
+  default:
+    strcpy(s, "DEFAULT");
+    return;
+  }
+}
+float check_ir_v(bool right);

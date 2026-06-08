@@ -9,6 +9,7 @@
 #define AXIS_RADIUS 13
 
 void do_circle();
+//angle in degrees
 void rotate_angle(float angle);
 
 void set_circle_clockwise();
