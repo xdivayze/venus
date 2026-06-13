@@ -33,7 +33,7 @@ enum color_sensor_colors { BLACK, WHITE, RED, BLUE, GREEN, DEFAULT };
 
 enum color_sensor_colors get_color();
 
-static inline void color_to_str(char *s, color_sensor_colors c) {
+static inline void color_to_str(char *s, enum color_sensor_colors c) {
   switch (c) {
   case BLACK:
     strcpy(s, "BLACK");

@@ -89,6 +89,7 @@ class Robot:
         self.angle += angle;
     def checkDistance(self):
         return -1;
+    
         
     def checkColorFront(self):
         px = self.location[0] + self.colorWorkingDistance * math.cos(self.angle)
@@ -100,7 +101,16 @@ class Robot:
         px = self.location[0] + self.colorWorkingDistance * math.cos(a)
         py = self.location[1] + self.colorWorkingDistance * math.sin(a)
         return self._sample(px, py)
-    
+
+    # IR aliases so the algorithm can talk to the sim and the physical robot
+    # through the same checkIR* interface, both returning Color. The simulated
+    # IR sensor is binary: tape -> BLACK, anything else -> WHITE.
+    def checkIRFront(self):
+        return Color.BLACK if self.checkColorFront() == Color.BLACK.value else Color.WHITE
+
+    def checkIRRight(self):
+        return Color.BLACK if self.checkColorRight() == Color.BLACK.value else Color.WHITE
+
 class Color(Enum):
     BLACK = 0
     WHITE = 1
@@ -116,6 +126,12 @@ class Color(Enum):
                 return Color.DEFAULT
     
 class RobotPhy:
+    # IR floor-sensor thresholds, in volts. Reading ABOVE the threshold means
+    # the bare floor (WHITE); BELOW means black tape (BLACK). The two sensors
+    # sit at different heights/gains, so they are calibrated separately.
+    IR_FRONT_THRESH = 3.0
+    IR_RIGHT_THRESH = 0.2
+
     def __init__(self, colorWorkingDistance: int, maxDist: int, connection: socket.socket):
         self.speed = 1;
         
@@ -143,36 +159,50 @@ class RobotPhy:
         203 - request ir right
         """
         
+    def _request(self, code: int) -> str:
+        """Send a request opcode and return the VALUE field of the reply.
+
+        The firmware frames replies as the ASCII string "CODE:VALUE". recv()
+        hands back bytes, so we must decode before splitting (splitting bytes
+        with a str delimiter raises TypeError -- the original bug)."""
+        self.connection.sendall(str(code).encode())
+        data = self.connection.recv(1024)
+        if not data:
+            raise ConnectionError("robot closed the connection")
+        text = data.decode(errors="ignore").strip()
+        return text.split(":", 1)[1].strip() if ":" in text else text
+
     def step(self, nr_steps: int):
         self.connection.sendall(("100:" + str(nr_steps)).encode());
+        # Dead-reckon the internal pose estimate the algorithm maps and closes
+        # the loop with. The real robot drifts away from this estimate; the
+        # edge-follower is built to tolerate exactly that.
+        self.location = (
+            self.location[0] + nr_steps * math.cos(self.angle),
+            self.location[1] + nr_steps * math.sin(self.angle),
+        )
     def turn(self, angle):
-        self.connection.sendall(("101: " + str(angle)).encode());
+        self.connection.sendall(("101:" + str(angle)).encode());
+        self.angle += angle
     def checkDistance(self)->int:
-        self.connection.sendall(("200".encode()));
-        data = self.connection.recv(1024);
-        return int(data.split(":")[1].strip());
-    
+        return int(self._request(200));
+
     def checkColorFront(self)->Color:
-        self.connection.sendall("201".encode());
-        data = self.connection.recv(1024).split(":")[1].strip();
-        return Color.str_to_color(data);
-    
+        return Color.str_to_color(self._request(201));
+
     @staticmethod
-    def ir_to_color(ir: float)->Color:
-        if (ir < 0.5):
+    def ir_to_color(ir: float, thresh: float)->Color:
+        # Above the threshold is bare floor (WHITE); below it is tape (BLACK).
+        if (ir < thresh):
             return Color.BLACK
-        
+
         return Color.WHITE
-            
+
     def checkIRFront(self)->Color:
-        self.connection.sendall("202".encode());
-        data = float(self.connection.recv(1024).split(":")[1].strip());
-        return self.ir_to_color(data);
-    
+        return self.ir_to_color(float(self._request(202)), self.IR_FRONT_THRESH);
+
     def checkIRRight(self)->Color:
-        self.connection.sendall("203".encode()); 
-        data = float(self.connection.recv(1024).split(":")[1].strip());
-        return self.ir_to_color(data);
+        return self.ir_to_color(float(self._request(203)), self.IR_RIGHT_THRESH);
 
         
     

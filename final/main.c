@@ -11,7 +11,7 @@
 
 int main() {
 
-  int status, valread, client_fd;
+  int client_fd;
   struct sockaddr_in serv_addr;
 
   if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -31,17 +31,28 @@ int main() {
   char msg[256] = {'\0'};
 
   while (1) {
-    read(client_fd, buffer, 1024 - 1);
-    char *payload = strtok(buffer, ":");
-    int command = atoi(buffer);
+    int n = read(client_fd, buffer, 1024 - 1);
+    if (n <= 0)
+      break; // peer closed the connection or error
+    buffer[n] = '\0'; // read() does not null-terminate
+
+    // Frame is "CODE:VALUE". The command is the first token; the value is the
+    // second. The previous code parsed the value out of the command token,
+    // so step() always moved 100 and rotate always turned ~101 rad.
+    char *cmd_str = strtok(buffer, ":");
+    if (cmd_str == NULL)
+      continue;
+    int command = atoi(cmd_str);
+    char *payload = strtok(NULL, ":"); // value field, NULL for bare requests
+
     if (command == 100) {
-      int nr_steps = atoi(payload);
+      int nr_steps = payload ? atoi(payload) : 0;
       step(nr_steps);
       continue;
     }
 
     if (command == 101) {
-      float angle_rad = atof(payload);
+      float angle_rad = payload ? atof(payload) : 0.0f;
       float angle_deg = angle_rad * 180.0f / M_PI;
       rotate_angle(angle_deg);
       continue;
@@ -49,14 +60,15 @@ int main() {
 
     if (command == 200) {
       float distance_data = read_tof();
-      sprintf(msg, "201:%i", (int)distance_data);
+      sprintf(msg, "200:%i", (int)distance_data);
       send(client_fd, msg, strlen(msg), 0);
       continue;
     }
 
     if (command == 201) {
-      color_to_str(msg, get_color());
-      sprintf(msg, "201:%s", msg);
+      char color_str[16];
+      color_to_str(color_str, get_color());
+      sprintf(msg, "201:%s", color_str);
       send(client_fd, msg, strlen(msg), 0);
       continue;
     }

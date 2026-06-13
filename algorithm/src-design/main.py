@@ -1,13 +1,16 @@
 import socket
 
-from robot import Robot
+from robot import Robot, RobotPhy, Color
 import math
 import os
 import time
 from collections import deque
 
-WHITE = 1
-BLACK = 0
+# Sensors report a Color; the algorithm only distinguishes tape from floor.
+WHITE = Color.WHITE
+BLACK = Color.BLACK
+# Raw value the dilated ground-truth map stores for a tape cell (sim oracle).
+TAPE_CELL = Color.BLACK.value
 
 # Proportional edge-follower tuning.
 DTHETA = math.radians(20)   # steering increment per control tick
@@ -38,7 +41,7 @@ def _components(sensemap, size):
     out = []
     for i in range(size):
         for j in range(size):
-            if sensemap[i][j] == BLACK and not seen[i][j]:
+            if sensemap[i][j] == TAPE_CELL and not seen[i][j]:
                 q = deque([(i, j)])
                 seen[i][j] = True
                 cells = []
@@ -47,7 +50,7 @@ def _components(sensemap, size):
                     cells.append((x, y))
                     for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                         a, b = x + dx, y + dy
-                        if in_bounds(a, b, size) and sensemap[a][b] == BLACK and not seen[a][b]:
+                        if in_bounds(a, b, size) and sensemap[a][b] == TAPE_CELL and not seen[a][b]:
                             seen[a][b] = True
                             q.append((a, b))
                 xs = [c[0] for c in cells]
@@ -134,13 +137,13 @@ def sweep(robot: Robot, dtheta: float = DTHETA):
 
     def front():
         stats["color_checks"] += 1
-        c = robot.checkColorFront()
+        c = robot.checkIRFront()
         _record(_sensor_cell(0.0), c)
         return c
 
     def right():
         stats["color_checks"] += 1
-        c = robot.checkColorRight()
+        c = robot.checkIRRight()
         _record(_sensor_cell(-math.pi / 2), c)
         return c
 
@@ -206,7 +209,7 @@ def sweep(robot: Robot, dtheta: float = DTHETA):
             while d < size:
                 x = round(cx + d * math.cos(th))
                 y = round(cy + d * math.sin(th))
-                if not in_bounds(x, y, size) or robot.sensemap[x][y] == BLACK:
+                if not in_bounds(x, y, size) or robot.sensemap[x][y] == TAPE_CELL:
                     break
                 d += 1
             if d > best_d:
@@ -215,9 +218,16 @@ def sweep(robot: Robot, dtheta: float = DTHETA):
 
     t0 = time.perf_counter()
 
+    # aim_open() and Phase 2 both read robot.sensemap -- a sim-side ground-truth
+    # oracle. The physical robot (RobotPhy) has no such map, so these are skipped
+    # on hardware: Phase 1 boundary-following uses only the front/right sensors
+    # and runs identically on the real robot.
+    has_oracle = hasattr(robot, "sensemap")
+
     # ---- Phase 1: outer boundary -------------------------------------------
     t_p1 = time.perf_counter()
-    aim_open()
+    if has_oracle:
+        aim_open()
     bootstrap_onto_tape(size)
     stats["phase1_term"] = edge_follow(depart_radius=8.0, return_tol=3.0,
                                        max_steps=6 * size)
@@ -225,9 +235,9 @@ def sweep(robot: Robot, dtheta: float = DTHETA):
     stats["phase1_steps"] = stats["steps"]
     stats["phase1_elapsed_sec"] = time.perf_counter() - t_p1
 
-    # ---- Phase 2: interior objects -----------------------------------------
+    # ---- Phase 2: interior objects (sim oracle only) -----------------------
     t_p2 = time.perf_counter()
-    comps = _components(robot.sensemap, size)
+    comps = _components(robot.sensemap, size) if has_oracle else []
     outer = comps[0] if comps else None   # biggest component = outer boundary
     for comp in comps:
         if comp is outer or comp["size"] < MIN_OBJECT_CELLS:
@@ -303,7 +313,7 @@ def write_report(black, white, other, stats, out_path):
         "-- totals --",
         f"turn() calls:            {stats['turns']}",
         f"step() calls:            {stats['steps']}",
-        f"checkColor*() calls:     {stats['color_checks']}",
+        f"checkIR*() calls:        {stats['color_checks']}",
         f"total rotation:          {math.degrees(rot):.0f}°"
         f" ({rot / (2 * math.pi):.1f} revolutions)",
         "",
@@ -322,32 +332,41 @@ def write_report(black, white, other, stats, out_path):
         f.write(report + "\n")
 
 
+HOST = "127.0.0.1"
+PORT = 8080
+
+
 if __name__ == "__main__":
-
-    # server = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
-    # server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);
-    # server.bind(("127.0.0.1", 8080));
-
-    # server.listen(1);
-
-    # connection, client_addr = server.accept();
-
-    #--
-
-    # print(f"{connection.recv(1024)}");
-
-    # connection.sendall("receive success".encode());
-
-    #--
-
     here = os.path.dirname(os.path.abspath(__file__))
 
-    robot = Robot(1, 128, error=0.005, tape_width=TAPE_WIDTH)
-    black, white, other, stats = sweep(robot)
+    # The robot firmware (final/main.c) is the TCP *client*; we are the server.
+    # It connects, then we drive it command-by-command over the socket.
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((HOST, PORT))
+    server.listen(1)
+    print(f"waiting for robot to connect on {HOST}:{PORT} ...")
+    connection, client_addr = server.accept()
+    print(f"robot connected from {client_addr}")
 
-    write_map(black, white, 128, os.path.join(here, "sweep_map.txt"))
-    write_report(black, white, other, stats,
-                 os.path.join(here, "sweep_report.txt"))
+    try:
+        robot = RobotPhy(1, 128, connection)
+        black, white, other, stats = sweep(robot)
 
-    # connection.close();
-    # server.close();
+        write_map(black, white, 128, os.path.join(here, "sweep_map.txt"))
+        write_report(black, white, other, stats,
+                     os.path.join(here, "sweep_report.txt"))
+    finally:
+        # 999 tells the firmware to leave its command loop and stop the motors.
+        try:
+            connection.sendall("999".encode())
+        except OSError:
+            pass
+        connection.close()
+        server.close()
+
+    # To run against the simulator instead of the physical robot, swap the
+    # try-block above for:
+    #     robot = Robot(1, 128, error=0.005, tape_width=TAPE_WIDTH)
+    #     black, white, other, stats = sweep(robot)
+    #     ... (same write_map / write_report)

@@ -91,3 +91,10 @@ enum color_sensor_colors get_color() {
 
   return DEFAULT;
 }
+
+#define IR_ADC_RIGHT ADC1
+#define IR_ADC_FRONT ADC2
+float check_ir_v(bool right) {
+  return (float) adc_read_channel(right ? IR_ADC_RIGHT : IR_ADC_FRONT);
+
+}
