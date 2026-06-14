@@ -66,7 +66,8 @@ def on_click(event: MouseEvent):
 
     fig.canvas.draw()
     
-    
+def point_array_to_instructions():
+    return
 
 if __name__ == "__main__":
     if (len(sys.argv) < 5): 
@@ -77,9 +78,10 @@ if __name__ == "__main__":
     img = cv.imread(abs_impath, cv.IMREAD_GRAYSCALE);
     img = cv.GaussianBlur(img, (0,0), 1.6);
     edges = cv.Canny(img, 150, 200);
+    
     loc = (round(float(sys.argv[3]) * img.shape[1]) , round(float(sys.argv[4]) * img.shape[0]));
     
-    np.vstack([clicked_points, loc]);
+    clicked_points = np.vstack([clicked_points, loc]);
     
     fig, ax = plt.subplots();
     ax.imshow(edges, cmap="gray");
@@ -91,6 +93,12 @@ if __name__ == "__main__":
     plt.show();
     
     px_per_cm = np.linalg.norm(measurement_points[-1] - measurement_points[0]) / dist
+    
+    clicked_points = clicked_points / px_per_cm;
+    
+    #TODO dot product to calculate the rotation needed
+    
+    
     
     
     
