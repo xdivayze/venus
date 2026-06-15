@@ -36,9 +36,6 @@ int main() {
       break; // peer closed the connection or error
     buffer[n] = '\0'; // read() does not null-terminate
 
-    // Frame is "CODE:VALUE". The command is the first token; the value is the
-    // second. The previous code parsed the value out of the command token,
-    // so step() always moved 100 and rotate always turned ~101 rad.
     char *cmd_str = strtok(buffer, ":");
     if (cmd_str == NULL)
       continue;
@@ -48,6 +45,8 @@ int main() {
     if (command == 100) {
       int nr_steps = payload ? atoi(payload) : 0;
       step(nr_steps);
+      strcpy(msg, "100");
+      send(client_fd, msg, strlen(msg), 0);
       continue;
     }
 
@@ -55,6 +54,8 @@ int main() {
       float angle_rad = payload ? atof(payload) : 0.0f;
       float angle_deg = angle_rad * 180.0f / M_PI;
       rotate_angle(angle_deg);
+      strcpy(msg, "101");
+      send(client_fd, msg, strlen(msg), 0);
       continue;
     }
 

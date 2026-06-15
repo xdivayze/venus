@@ -126,9 +126,6 @@ class Color(Enum):
                 return Color.DEFAULT
     
 class RobotPhy:
-    # IR floor-sensor thresholds, in volts. Reading ABOVE the threshold means
-    # the bare floor (WHITE); BELOW means black tape (BLACK). The two sensors
-    # sit at different heights/gains, so they are calibrated separately.
     IR_FRONT_THRESH = 3.0
     IR_RIGHT_THRESH = 0.2
 
@@ -159,30 +156,34 @@ class RobotPhy:
         203 - request ir right
         """
         
-    def _request(self, code: int) -> str:
-        """Send a request opcode and return the VALUE field of the reply.
-
-        The firmware frames replies as the ASCII string "CODE:VALUE". recv()
-        hands back bytes, so we must decode before splitting (splitting bytes
-        with a str delimiter raises TypeError -- the original bug)."""
-        self.connection.sendall(str(code).encode())
+    def _receive_and_decode(self):
         data = self.connection.recv(1024)
         if not data:
             raise ConnectionError("robot closed the connection")
         text = data.decode(errors="ignore").strip()
+        return text
+        
+    def _request(self, code: int) -> str:
+        self.connection.sendall(str(code).encode())
+        text = self._receive_and_decode();
         return text.split(":", 1)[1].strip() if ":" in text else text
 
     def step(self, nr_steps: int):
         self.connection.sendall(("100:" + str(nr_steps)).encode());
-        # Dead-reckon the internal pose estimate the algorithm maps and closes
-        # the loop with. The real robot drifts away from this estimate; the
-        # edge-follower is built to tolerate exactly that.
-        self.location = (
+        text = self._receive_and_decode();
+        if (text != "100"):
+            raise ConnectionError("NACK");
+        self.location = ( #this estimate will almost always be off due to physical robot error
             self.location[0] + nr_steps * math.cos(self.angle),
             self.location[1] + nr_steps * math.sin(self.angle),
         )
+        
+    #angle in radians
     def turn(self, angle):
         self.connection.sendall(("101:" + str(angle)).encode());
+        text = self._receive_and_decode();
+        if (text != "101"):
+            raise ConnectionError("NACK");
         self.angle += angle
     def checkDistance(self)->int:
         return int(self._request(200));
