@@ -136,41 +136,57 @@ def robot_do_instructions(instructions: list[Instruction]):
         
 
 if __name__ == "__main__":
-    if (len(sys.argv) < 6): 
+    if (len(sys.argv) < 7): 
         #normalized locations are specified 0 to 1 relative to the shape of the image
         #initial heading is angle of the robot measured from +x in degrees CCW POS
-        raise "usage: file.py image_path output_path normalized_start_location_x normalized_start_location_y initial_heading_deg"
-    abs_impath = os.path.abspath(sys.argv[1]);
+        raise "usage: file.py image_path output_path normalized_start_location_x normalized_start_location_y initial_heading_deg dump_mode"
     abs_outpath = os.path.abspath(sys.argv[2]);
-    
-    img = cv.imread(abs_impath, cv.IMREAD_GRAYSCALE);
-    img = cv.GaussianBlur(img, (0,0), 1.6);
-    edges = cv.Canny(img, 150, 200);
-    
-    loc = (round(float(sys.argv[3]) * img.shape[1]) , round(float(sys.argv[4]) * img.shape[0]));
-    
-    clicked_points = np.vstack([clicked_points, loc]);
-    
-    fig, ax = plt.subplots();
-    ax.imshow(edges, cmap="gray");
-    ax.set_title("click to log points");
-    
-    fig.canvas.mpl_connect("button_press_event", on_click);
-    
-    plt.tight_layout();
-    plt.show();
-    
-    px_per_cm = np.linalg.norm(measurement_points[-1] - measurement_points[0]) / dist
-    
-    clicked_points_real = clicked_points / px_per_cm;
-    
-    # initial heading as a +x-CCW angle (deg) -> unit direction vector, since
-    # point_array_to_instructions / calculate_signed_angle operate on vectors.
-    initial_theta = np.radians( float(sys.argv[5]));
-    initial_heading = np.array([np.cos(initial_theta), np.sin(initial_theta)]);
+    dump_mode = int(sys.argv[6])
+    if (dump_mode):
+        abs_impath = os.path.abspath(sys.argv[1]);
+        
+        img = cv.imread(abs_impath, cv.IMREAD_GRAYSCALE);
+        img = cv.GaussianBlur(img, (0,0), 1.6);
+        edges = cv.Canny(img, 150, 200);
+        
+        loc = (round(float(sys.argv[3]) * img.shape[1]) , round(float(sys.argv[4]) * img.shape[0]));
+        
+        clicked_points = np.vstack([clicked_points, loc]);
+        
+        fig, ax = plt.subplots();
+        ax.imshow(edges, cmap="gray");
+        ax.set_title("click to log points");
+        
+        fig.canvas.mpl_connect("button_press_event", on_click);
+        
+        plt.tight_layout();
+        plt.show();
+        
+        px_per_cm = np.linalg.norm(measurement_points[-1] - measurement_points[0]) / dist
+        
+        clicked_points_real = clicked_points / px_per_cm;
+        
+        # initial heading as a +x-CCW angle (deg) -> unit direction vector, since
+        # point_array_to_instructions / calculate_signed_angle operate on vectors.
+        initial_theta = np.radians( float(sys.argv[5]));
+        initial_heading = np.array([np.cos(initial_theta), np.sin(initial_theta)]);
 
-    instructions = point_array_to_instructions(clicked_points_real, initial_heading);
-    robot_do_instructions(instructions);
+        instructions: list[Instruction] = point_array_to_instructions(clicked_points_real, initial_heading);
+        
+        with open(abs_outpath, "w") as f:
+            for v in instructions:
+                f.write(f"{v.operation}:{v.payload}\n");
+                
+    else:
+        instructions: list[Instruction] = [];
+        with open(abs_outpath, "r") as f:
+            for line in f.readlines():
+                tokens = line.strip().split(":")
+                instructions.append(Instruction(int(tokens[0]), float(tokens[1])));
+        
+        print(instructions) 
+           
+        #robot_do_instructions(instructions);
     
     
     
