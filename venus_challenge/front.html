@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Venus Map</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; color: #eee; font-family: monospace; display: flex; height: 100vh; overflow: hidden; }
+  #sidebar { width: 280px; background: #16213e; padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  #sidebar h2 { color: #e94560; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; }
+  .section { background: #0f3460; border-radius: 6px; padding: 10px; }
+  .section h3 { font-size: 11px; color: #a0aec0; text-transform: uppercase; margin-bottom: 8px; }
+  .robot-entry { font-size: 12px; margin-bottom: 4px; }
+  .sample-entry { font-size: 11px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  #log { flex: 1; overflow-y: auto; font-size: 10px; color: #68d391; }
+  #log div { margin-bottom: 2px; }
+  #map-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  canvas { border: 1px solid #0f3460; }
+  #status { font-size: 11px; color: #a0aec0; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>🪐 Venus Map</h2>
+  <div class="section">
+    <h3>Robots</h3>
+    <div id="robot-list">No data yet</div>
+  </div>
+  <div class="section">
+    <h3>Samples</h3>
+    <div id="sample-list">None found</div>
+  </div>
+  <div class="section">
+    <h3>Log</h3>
+    <div id="log"></div>
+  </div>
+</div>
+
+<div id="map-area">
+  <canvas id="map" width="800" height="700"></canvas>
+  <div id="status">Connecting to WebSocket...</div>
+</div>
+
+<script>
+const canvas = document.getElementById('map');
+const ctx = canvas.getContext('2d');
+const CELL = 20; // pixels per cell (each cell = 5cm)
+
+// Map state
+const state = {
+  robots: {},     // id -> {x, y, color}
+  samples: [],    // {x, y, color, temp, size}
+  hills: [],      // {x, y}
+  cliffEdges: [], // {x, y, side} where side = 'top'|'bottom'|'left'|'right'
+  explored: new Set(),
+};
+
+let offsetX = 400, offsetY = 350; // canvas center
+
+function worldToCanvas(wx, wy) {
+  return [offsetX + wx * CELL, offsetY - wy * CELL];
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Background
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Grid
+  ctx.strokeStyle = '#0f3460';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x < canvas.width; x += CELL) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y < canvas.height; y += CELL) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+
+  // Explored cells
+  state.explored.forEach(key => {
+    const [cx, cy] = key.split(',').map(Number);
+    const [px, py] = worldToCanvas(cx, cy);
+    ctx.fillStyle = 'rgba(100, 200, 100, 0.08)';
+    ctx.fillRect(px, py - CELL, CELL, CELL);
+  });
+
+  // Cliff edges
+  ctx.strokeStyle = '#e94560';
+  ctx.lineWidth = 3;
+  state.cliffEdges.forEach(({x, y, side}) => {
+    const [px, py] = worldToCanvas(x, y);
+    ctx.beginPath();
+    if (side === 'top')    { ctx.moveTo(px, py - CELL); ctx.lineTo(px + CELL, py - CELL); }
+    if (side === 'bottom') { ctx.moveTo(px, py);        ctx.lineTo(px + CELL, py); }
+    if (side === 'left')   { ctx.moveTo(px, py - CELL); ctx.lineTo(px, py); }
+    if (side === 'right')  { ctx.moveTo(px + CELL, py - CELL); ctx.lineTo(px + CELL, py); }
+    ctx.stroke();
+  });
+
+  // Hills
+  state.hills.forEach(({x, y}) => {
+    const [px, py] = worldToCanvas(x, y);
+    ctx.fillStyle = '#d69e2e';
+    ctx.beginPath();
+    ctx.moveTo(px + CELL/2, py - CELL);
+    ctx.lineTo(px + CELL, py);
+    ctx.lineTo(px, py);
+    ctx.closePath();
+    ctx.fill();
+  });
+
+  // Samples
+  state.samples.forEach(({x, y, color, size}) => {
+    const [px, py] = worldToCanvas(x, y);
+    const r = size === 'large' ? 8 : 5;
+    ctx.fillStyle = color || '#fff';
+    ctx.beginPath();
+    ctx.arc(px + CELL/2, py - CELL/2, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+
+  // Robots
+  Object.entries(state.robots).forEach(([id, {x, y, color}]) => {
+    const [px, py] = worldToCanvas(x, y);
+    ctx.fillStyle = color || '#63b3ed';
+    ctx.fillRect(px + 2, py - CELL + 2, CELL - 4, CELL - 4);
+    ctx.fillStyle = '#fff';
+    ctx.font = '9px monospace';
+    ctx.fillText(id.slice(-1), px + 6, py - 5);
+  });
+
+  // Origin marker
+  const [ox, oy] = worldToCanvas(0, 0);
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(ox - 8, oy); ctx.lineTo(ox + 8, oy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ox, oy - 8); ctx.lineTo(ox, oy + 8); ctx.stroke();
+}
+
+function updateSidebar() {
+  // Robots
+  const rl = document.getElementById('robot-list');
+  const robotEntries = Object.entries(state.robots);
+  rl.innerHTML = robotEntries.length
+    ? robotEntries.map(([id, {x, y}]) =>
+        `<div class="robot-entry">🤖 ${id}: (${x}, ${y})</div>`).join('')
+    : 'No data yet';
+
+  // Samples
+  const sl = document.getElementById('sample-list');
+  sl.innerHTML = state.samples.length
+    ? state.samples.map(s =>
+        `<div class="sample-entry">
+          <div class="color-dot" style="background:${s.color}"></div>
+          ${s.color} ${s.size} — ${s.temp}°C
+        </div>`).join('')
+    : 'None found';
+}
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.prepend(d);
+  if (el.children.length > 100) el.lastChild.remove();
+}
+
+function handleMessage(envelope) {
+  const { topic, data } = envelope;
+
+  const payloadString = data.raw_text !== undefined ? data.raw_text : JSON.stringify(data);
+
+  if (topic === '/pynqbridge/26/positions' || topic === '/pynqbridge/58/positions') {
+    const robotId = topic.split('/')[2];
+    state.robots[robotId] = { x: data.x, y: data.y, color: '#63b3ed' };
+    state.explored.add(`${data.x},${data.y}`);
+    log(`Robot ${robotId} at (${data.x}, ${data.y})`);
+    
+  } else if (topic === '/pynqbridge/26/cliff' || topic === '/pynqbridge/58/cliff') {
+    state.cliffEdges.push({ x: data.x, y: data.y, side: data.side });
+    log(`Cliff edge at (${data.x}, ${data.y}) side: ${data.side}`);
+    
+  } else if (topic === '/pynqbridge/26/sample' || topic === '/pynqbridge/58/sample') {
+    state.samples.push({ x: data.x, y: data.y, color: data.color, temp: data.temp, size: data.size });
+    log(`Sample found: ${data.color} ${data.size} at (${data.x}, ${data.y}) ${data.temp}°C`);
+    
+  } else if (topic === '/pynqbridge/26/hill' || topic === '/pynqbridge/58/hill') {
+    state.hills.push({ x: data.x , y: data.y });
+    log(`Hill at (${data.x}, ${data.y})`);
+    
+  } 
+  else if (
+    topic === '/pynqbridge/26/recv' || topic === '/pynqbridge/26/send' || topic === '/pynqbridge/58/recv' || topic === '/pynqbridge/58/send'
+  ) {
+    const parts = topic.split('/');
+    const robotId = parts[2];
+    
+    log(`[Robot ${robotId} ${topic.split('/')[3].toUpperCase()}] ${payloadString}`);
+    
+  } 
+  else {
+    log(`[${topic}] -> ${payloadString}`);
+  }
+
+  draw();
+  updateSidebar();
+}
+
+// WebSocket connection
+function connect() {
+  const ws = new WebSocket('ws://localhost:8765');
+  const status = document.getElementById('status');
+
+  ws.onopen = () => {
+    status.textContent = '🟢 Connected';
+    status.style.color = '#68d391';
+    log('Connected to server');
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const envelope = JSON.parse(event.data);
+      handleMessage(envelope);
+    } catch (e) {
+      log('Parse error: ' + e);
+    }
+  };
+
+  ws.onclose = () => {
+    status.textContent = '🔴 Disconnected — retrying in 3s...';
+    status.style.color = '#e94560';
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {
+    status.textContent = '🔴 Connection error';
+    status.style.color = '#e94560';
+  };
+}
+
+draw();
+connect();
+</script>
+</body>
+</html>
