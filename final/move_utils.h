@@ -6,7 +6,7 @@
 #define FULL_ROTATION_CYCLE 1600
 
 #define WHEEL_RADIUS 4
-#define AXIS_RADIUS 13
+#define AXIS_RADIUS 13 //interwheel distance
 
 void do_circle();
 //angle in degrees
