@@ -9,7 +9,15 @@
 #include <unistd.h>
 #define PORT 8080
 
+#include <stepper.h>
+
 int main() {
+
+  pynq_init();
+  stepper_init();
+	
+  stepper_enable();
+  stepper_set_speed(20000, 20000);
 
   int client_fd;
   struct sockaddr_in serv_addr;
@@ -41,7 +49,7 @@ int main() {
       continue;
     int command = atoi(cmd_str);
     char *payload = strtok(NULL, ":"); // value field, NULL for bare requests
-
+	printf("received\n");
     if (command == 100) {
       int nr_steps = payload ? atoi(payload) : 0;
       step(nr_steps);
@@ -93,4 +101,6 @@ int main() {
   }
   strcpy(msg, "999:ROBOT_END");
   send(client_fd, msg, strlen(msg), 0);
+
+  pynq_destroy();
 }
