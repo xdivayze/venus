@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 import os
 import random
@@ -23,11 +25,6 @@ class Robot:
         # (relative turns, local sensing) is meant to tolerate.
         self.error = error;
         self.bytemap = [[0] * maxDist for _ in range(maxDist)]
-        with open(os.path.normpath(os.path.join(__file__, "../../tests/assets/obstacle_map_no_white_obstacle_out")), "rb") as f:
-            for i in range(maxDist):
-                line = f.readline(maxDist)
-                self.bytemap[i] = [c - 48 for c in line.strip()]
-            f.close();
 
 
         self.colorWorkingDistance = colorWorkingDistance;
@@ -137,12 +134,7 @@ class RobotPhy:
         
         self.angle = 0.0;
         self.bytemap = [[0] * maxDist for _ in range(maxDist)]
-        with open(os.path.normpath(os.path.join(__file__, "../../tests/assets/obstacle_map_no_white_obstacle_out")), "rb") as f:
-            for i in range(maxDist):
-                line = f.readline(maxDist)
-                self.bytemap[i] = [c - 48 for c in line.strip()]
-            f.close();
-            
+           
         
         self.colorWorkingDistance = colorWorkingDistance;
         self.connection = connection;
