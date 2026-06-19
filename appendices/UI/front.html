@@ -46,18 +46,17 @@
 <script>
 const canvas = document.getElementById('map');
 const ctx = canvas.getContext('2d');
-const CELL = 20; // pixels per cell (each cell = 5cm)
+const CELL = 20;
 
-// Map state
 const state = {
-  robots: {},     // id -> {x, y, color}
-  samples: [],    // {x, y, color, temp, size}
-  hills: [],      // {x, y}
-  cliffEdges: [], // {x, y, side} where side = 'top'|'bottom'|'left'|'right'
+  robots: {},
+  samples: [],
+  hills: [],
+  cliffEdges: [],
   explored: new Set(),
 };
 
-let offsetX = 400, offsetY = 350; // canvas center
+let offsetX = 400, offsetY = 350;
 
 function worldToCanvas(wx, wy) {
   return [offsetX + wx * CELL, offsetY - wy * CELL];
@@ -66,11 +65,9 @@ function worldToCanvas(wx, wy) {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Background
   ctx.fillStyle = '#1a1a2e';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Grid
   ctx.strokeStyle = '#0f3460';
   ctx.lineWidth = 0.5;
   for (let x = 0; x < canvas.width; x += CELL) {
@@ -80,7 +77,6 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
   }
 
-  // Explored cells
   state.explored.forEach(key => {
     const [cx, cy] = key.split(',').map(Number);
     const [px, py] = worldToCanvas(cx, cy);
@@ -88,7 +84,6 @@ function draw() {
     ctx.fillRect(px, py - CELL, CELL, CELL);
   });
 
-  // Cliff edges
   ctx.strokeStyle = '#e94560';
   ctx.lineWidth = 3;
   state.cliffEdges.forEach(({x, y, side}) => {
@@ -101,7 +96,6 @@ function draw() {
     ctx.stroke();
   });
 
-  // Hills
   state.hills.forEach(({x, y}) => {
     const [px, py] = worldToCanvas(x, y);
     ctx.fillStyle = '#d69e2e';
@@ -113,7 +107,6 @@ function draw() {
     ctx.fill();
   });
 
-  // Samples
   state.samples.forEach(({x, y, color, size}) => {
     const [px, py] = worldToCanvas(x, y);
     const r = size === 'large' ? 8 : 5;
@@ -126,7 +119,6 @@ function draw() {
     ctx.stroke();
   });
 
-  // Robots
   Object.entries(state.robots).forEach(([id, {x, y, color}]) => {
     const [px, py] = worldToCanvas(x, y);
     ctx.fillStyle = color || '#63b3ed';
@@ -136,7 +128,6 @@ function draw() {
     ctx.fillText(id.slice(-1), px + 6, py - 5);
   });
 
-  // Origin marker
   const [ox, oy] = worldToCanvas(0, 0);
   ctx.strokeStyle = '#555';
   ctx.lineWidth = 1;
@@ -145,7 +136,6 @@ function draw() {
 }
 
 function updateSidebar() {
-  // Robots
   const rl = document.getElementById('robot-list');
   const robotEntries = Object.entries(state.robots);
   rl.innerHTML = robotEntries.length
@@ -153,7 +143,6 @@ function updateSidebar() {
         `<div class="robot-entry">🤖 ${id}: (${x}, ${y})</div>`).join('')
     : 'No data yet';
 
-  // Samples
   const sl = document.getElementById('sample-list');
   sl.innerHTML = state.samples.length
     ? state.samples.map(s =>
@@ -172,48 +161,59 @@ function log(msg) {
   if (el.children.length > 100) el.lastChild.remove();
 }
 
+function getEventType(topic) {
+  // Extract the last segment: /pynqbridge/26/sample -> "sample"
+  return topic.split('/').pop();
+}
+
+function getRobotId(topic) {
+  return topic.split('/')[2];
+}
+
 function handleMessage(envelope) {
   const { topic, data } = envelope;
+  const event = getEventType(topic);
+  const robotId = getRobotId(topic);
 
-  const payloadString = data.raw_text !== undefined ? data.raw_text : JSON.stringify(data);
+  console.log('Received envelope:', JSON.stringify(envelope));
 
-  if (topic === '/pynqbridge/26/positions' || topic === '/pynqbridge/58/positions') {
-    const robotId = topic.split('/')[2];
-    state.robots[robotId] = { x: data.x, y: data.y, color: '#63b3ed' };
-    state.explored.add(`${data.x},${data.y}`);
-    log(`Robot ${robotId} at (${data.x}, ${data.y})`);
-    
-  } else if (topic === '/pynqbridge/26/cliff' || topic === '/pynqbridge/58/cliff') {
-    state.cliffEdges.push({ x: data.x, y: data.y, side: data.side });
-    log(`Cliff edge at (${data.x}, ${data.y}) side: ${data.side}`);
-    
-  } else if (topic === '/pynqbridge/26/sample' || topic === '/pynqbridge/58/sample') {
-    state.samples.push({ x: data.x, y: data.y, color: data.color, temp: data.temp, size: data.size });
-    log(`Sample found: ${data.color} ${data.size} at (${data.x}, ${data.y}) ${data.temp}°C`);
-    
-  } else if (topic === '/pynqbridge/26/hill' || topic === '/pynqbridge/58/hill') {
-    state.hills.push({ x: data.x , y: data.y });
-    log(`Hill at (${data.x}, ${data.y})`);
-    
-  } 
-  else if (
-    topic === '/pynqbridge/26/recv' || topic === '/pynqbridge/26/send' || topic === '/pynqbridge/58/recv' || topic === '/pynqbridge/58/send'
-  ) {
-    const parts = topic.split('/');
-    const robotId = parts[2];
-    
-    log(`[Robot ${robotId} ${topic.split('/')[3].toUpperCase()}] ${payloadString}`);
-    
-  } 
-  else {
-    log(`[${topic}] -> ${payloadString}`);
+  switch (event) {
+    case 'positions':
+      state.robots[robotId] = { x: data.x, y: data.y, color: '#63b3ed' };
+      state.explored.add(`${data.x},${data.y}`);
+      log(`Robot ${robotId} at (${data.x}, ${data.y}) heading ${data.heading}°`);
+      break;
+
+    case 'cliff':
+      state.cliffEdges.push({ x: data.x, y: data.y, side: data.side });
+      log(`Cliff edge at (${data.x}, ${data.y}) side: ${data.side}`);
+      break;
+
+    case 'sample':
+      state.samples.push({ x: data.x, y: data.y, color: data.color, temp: data.temp, size: data.size });
+      log(`Sample: ${data.color} ${data.size} at (${data.x}, ${data.y}) ${data.temp}°C`);
+      break;
+
+    case 'hill':
+      state.hills.push({ x: data.x, y: data.y });
+      log(`Hill at (${data.x}, ${data.y})`);
+      break;
+
+    case 'send':
+    case 'recv':
+      // Raw command passthrough — just log it
+      const raw = data.raw_text !== undefined ? data.raw_text : JSON.stringify(data);
+      log(`[Robot ${robotId} ${event.toUpperCase()}] ${raw}`);
+      break;
+
+    default:
+      log(`[${topic}] ${JSON.stringify(data)}`);
   }
 
   draw();
   updateSidebar();
 }
 
-// WebSocket connection
 function connect() {
   const ws = new WebSocket('ws://localhost:8765');
   const status = document.getElementById('status');
