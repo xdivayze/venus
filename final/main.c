@@ -1,3 +1,4 @@
+#include "communication.h"
 #include "move_utils.h"
 #include "sensors.h"
 #include <arpa/inet.h>
@@ -15,7 +16,7 @@ int main() {
 
   pynq_init();
   stepper_init();
-	
+
   stepper_enable();
   stepper_set_speed(20000, 20000);
 
@@ -41,7 +42,7 @@ int main() {
   while (1) {
     int n = read(client_fd, buffer, 1024 - 1);
     if (n <= 0)
-      break; // peer closed the connection or error
+      break;          // peer closed the connection or error
     buffer[n] = '\0'; // read() does not null-terminate
 
     char *cmd_str = strtok(buffer, ":");
@@ -49,7 +50,7 @@ int main() {
       continue;
     int command = atoi(cmd_str);
     char *payload = strtok(NULL, ":"); // value field, NULL for bare requests
-	printf("received\n");
+    printf("received\n");
     if (command == 100) {
       int nr_steps = payload ? atoi(payload) : 0;
       step(nr_steps);
@@ -65,6 +66,12 @@ int main() {
       strcpy(msg, "101");
       send(client_fd, msg, strlen(msg), 0);
       continue;
+    }
+    if (command == 102) {
+      if (!send_msg(payload)) {
+        strcpy(msg, "102");
+        send(client_fd, msg, strlen(msg), 0);
+      }
     }
 
     if (command == 200) {

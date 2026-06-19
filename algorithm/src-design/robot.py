@@ -111,7 +111,10 @@ class Robot:
 class Color(Enum):
     BLACK = 0
     WHITE = 1
-    DEFAULT = 7
+    RED = 2
+    BLUE = 3 
+    GREEN = 4 
+    DEFAULT = 5
     
     def str_to_color(s)->Color: 
         match s:
@@ -119,6 +122,12 @@ class Color(Enum):
                 return Color.BLACK
             case "WHITE":
                 return Color.WHITE
+            case "RED":
+                return Color.RED
+            case "BLUE":
+                return Color.BLUE
+            case "GREEN":
+                return Color.GREEN
             case _:
                 return Color.DEFAULT
     
@@ -142,6 +151,7 @@ class RobotPhy:
         """
         100 - step
         101 - turn
+        102 - send data to satellite
         200 - request distance
         201 - request color front
         202 - request ir front
@@ -177,6 +187,13 @@ class RobotPhy:
         if (text != "101"):
             raise ConnectionError("NACK");
         self.angle += angle
+        
+    def sendDataMQTT(self, payload: str):
+        self.connection.sendall(("102:"+payload).encode())
+        text = self._receive_and_decode();
+        if (text != "102"):
+            raise ConnectionError("NACK");
+        
     def checkDistance(self)->int:
         return int(self._request(200));
 
@@ -197,6 +214,7 @@ class RobotPhy:
     def checkIRRight(self)->Color:
         return self.ir_to_color(float(self._request(203)), self.IR_RIGHT_THRESH);
 
+    
         
     
     
